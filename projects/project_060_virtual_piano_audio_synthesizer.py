@@ -1,13 +1,14 @@
-# Project 60: Virtual Piano & Audio Synthesizer
-# 100 Real-World Python Projects - Anuj Kumar Saxena
-import tkinter as tk
-import math
-import struct
-import wave
 import io
+import math
 import os
-import subprocess
 import platform
+import shutil
+import struct
+import subprocess
+import tempfile
+import threading
+import tkinter as tk
+import wave
 
 # Musical notes frequencies (Middle C Octave)
 NOTES = {
@@ -19,24 +20,58 @@ NOTES = {
     "A": 440.00,
     "B": 493.88,
 }
+SYSTEM = platform.system()
+WAV_FILES = {}  # note -> temporary .wav file (macOS / Linux players)
 
 
-def generate_tone_wav(freq, duration=0.3, sample_rate=22050):
+def generate_tone_wav(freq, duration=0.5, sample_rate=22050):
+    """Build a WAV file in memory: a sine wave that fades out."""
     num_samples = int(duration * sample_rate)
+    frames = bytearray()
+    for i in range(num_samples):
+        t = i / sample_rate
+        sample = math.sin(2.0 * math.pi * freq * t)  # sine wave
+        envelope = 1.0 - (i / num_samples)  # decay: loud -> silent
+        frames += struct.pack("<h", int(sample * envelope * 30000))
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wav:
-        wav.setnchannels(1)  # Mono
+        wav.setnchannels(1)  # mono
         wav.setsampwidth(2)  # 16-bit
         wav.setframerate(sample_rate)
-        for i in range(num_samples):
-            # Sine wave formula
-            t = float(i) / sample_rate
-            sample = math.sin(2.0 * math.pi * freq * t)
-            # Apply decay envelope
-            envelope = max(0.0, 1.0 - (i / num_samples))
-            packed = struct.pack("<h", int(sample * envelope * 32767))
-            wav.writeframes(packed)
+        wav.writeframes(bytes(frames))
     return buf.getvalue()
+
+
+def play_sound(note, audio_bytes):
+    """Play WAV data. Returns True if a sound player was available."""
+    if SYSTEM == "Windows":
+        import winsound
+
+        # SND_MEMORY cannot be combined with SND_ASYNC (Python raises an
+        # error), so the sound is played in a background thread instead.
+        threading.Thread(
+            target=winsound.PlaySound,
+            args=(audio_bytes, winsound.SND_MEMORY),
+            daemon=True,
+        ).start()
+        return True
+    player = (
+        shutil.which("afplay")  # macOS
+        or shutil.which("paplay")  # Linux (PulseAudio)
+        or shutil.which("aplay")  # Linux (ALSA)
+    )
+    if player is None:
+        return False
+    path = WAV_FILES.get(note)
+    if path is None:
+        path = os.path.join(tempfile.gettempdir(), f"piano_{note}.wav")
+        with open(path, "wb") as f:
+            f.write(audio_bytes)
+        WAV_FILES[note] = path
+    subprocess.Popen(
+        [player, path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+    return True
 
 
 class VirtualPiano(tk.Tk):
@@ -46,6 +81,8 @@ class VirtualPiano(tk.Tk):
         self.geometry("540x280")
         self.resizable(False, False)
         self.configure(bg="#0f172a")
+        # Generate every note once, so a key press responds instantly
+        self.sounds = {n: generate_tone_wav(f) for n, f in NOTES.items()}
         tk.Label(
             self,
             text="VIRTUAL PIANO SYNTHESIZER",
@@ -83,21 +120,17 @@ class VirtualPiano(tk.Tk):
             self.bind(k_char, lambda e, n=note, f=freq: self.play_note(n, f))
 
     def play_note(self, note, freq):
-        self.status.config(text=f"Playing Note: {note} ({freq:.1f} Hz)")
-        audio_bytes = generate_tone_wav(freq)
-        # Audio playback using native OS sound systems
-        if platform.system().lower() == "windows":
-            try:
-                import winsound
-
-                winsound.PlaySound(
-                    audio_bytes, winsound.SND_MEMORY | winsound.SND_ASYNC
-                )
-            except Exception:
-                pass
+        try:
+            played = play_sound(note, self.sounds[note])
+        except Exception:
+            played = False
+        if played:
+            self.status.config(text=f"Playing Note: {note} ({freq:.1f} Hz)")
         else:
-            # Fallback bell on POSIX systems if audio devices are unconfigured
             self.bell()
+            self.status.config(
+                text=f"No audio player found - bell only (note {note})"
+            )
 
 
 if __name__ == "__main__":
