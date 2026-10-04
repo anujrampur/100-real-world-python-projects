@@ -21,7 +21,7 @@ On some systems the command is `python3` or `py`. Project 1 runs in the terminal
 
 ## Notes
 
-- Project 47 uses the Windows `netsh` command. Project 60 plays real sound only on Windows (`winsound`).
+- Project 47 uses the Windows `netsh` command. Project 60 plays sound with `winsound` on Windows and with `afplay`, `paplay` or `aplay` on macOS/Linux (bell only if none is installed). Projects 7, 29, 47, 49 and 60 were also run on Windows.
 - Projects 32, 33, 47, 48, 49 and 96 touch the network, files or processes. Use them only on systems you own or are allowed to test.
 - Test file-changing projects (21, 45, 48, 95) on copies of your data first.
 - The cryptography projects (41, 42, 43, 50, 72) are learning examples. For real applications use well-reviewed libraries.
